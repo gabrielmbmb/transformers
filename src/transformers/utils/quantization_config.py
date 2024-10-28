@@ -1230,7 +1230,8 @@ class TorchAoConfig(QuantizationConfigMixin):
 
     Args:
         quant_type (`str`):
-            The type of quantization we want to use, currently supporting: `int4_weight_only`, `int8_weight_only` and `int8_dynamic_activation_int8_weight`.
+            The type of quantization we want to use, currently supporting: `int4_weight_only`, `int8_weight_only`, `int8_dynamic_activation_int4_weight`
+            and `int8_dynamic_activation_int8_weight`.
         modules_to_not_convert (`list`, *optional*, default to `None`):
             The list of modules to not quantize, useful for quantizing models that explicitly require to have
             some modules left in their original precision.
@@ -1290,6 +1291,7 @@ class TorchAoConfig(QuantizationConfigMixin):
         if is_torchao_available():
             from torchao.quantization import (
                 int4_weight_only,
+                int8_dynamic_activation_int4_weight,
                 int8_dynamic_activation_int8_weight,
                 int8_weight_only,
             )
@@ -1297,6 +1299,7 @@ class TorchAoConfig(QuantizationConfigMixin):
             return {
                 "int4_weight_only": int4_weight_only,
                 "int8_weight_only": int8_weight_only,
+                "int8_dynamic_activation_int4_weight": int8_dynamic_activation_int4_weight,
                 "int8_dynamic_activation_int8_weight": int8_dynamic_activation_int8_weight,
             }
         else:
