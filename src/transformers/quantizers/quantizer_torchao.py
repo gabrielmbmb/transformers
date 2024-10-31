@@ -114,7 +114,8 @@ class TorchAoHfQuantizer(HfQuantizer):
     def _process_model_before_weight_loading(self, model: "PreTrainedModel", **kwargs):
         from ..integrations import get_keys_to_not_convert
 
-        self.modules_to_not_convert = get_keys_to_not_convert(model)
+        if self.quantization_config.quant_type != "int8_dynamic_activation_int4_weight":
+            self.modules_to_not_convert = get_keys_to_not_convert(model)
 
         if self.quantization_config.modules_to_not_convert is not None:
             self.modules_to_not_convert.extend(self.quantization_config.modules_to_not_convert)
