@@ -180,6 +180,7 @@ class TorchAoHfQuantizer(HfQuantizer):
     def is_trainable(self):
         supported_quant_types_for_training = [
             "int8_weight_only",
+            "int8_dynamic_activation_int4_weight",
             "int8_dynamic_activation_int8_weight",
         ]
         return self.quantization_config.quant_type in supported_quant_types_for_training
