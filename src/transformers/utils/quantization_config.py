@@ -1339,10 +1339,7 @@ class TorchAoConfig(QuantizationConfigMixin):
 
             matches = True
             for pattern_part, param_part in zip(pattern_parts, param_parts):
-                # Handle wildcard
-                if pattern_part == "*":
-                    break  # Rest of the path will match
-                elif pattern_part != param_part:
+                if pattern_part != param_part:
                     matches = False
                     break
 

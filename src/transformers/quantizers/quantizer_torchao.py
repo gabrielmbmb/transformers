@@ -97,7 +97,10 @@ class TorchAoHfQuantizer(HfQuantizer):
                 "int8_weight_only": torch.int8,
                 "int8_dynamic_activation_int4_weight": torch.int8,
                 "int8_dynamic_activation_int8_weight": torch.int8,
+
             }
+
+            # TODO: what do we return if `quant_type` is a dictionary with a quant method per module?
             return map_to_target_dtype[self.quantization_config.quant_type]
         else:
             raise ValueError(
