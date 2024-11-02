@@ -21,7 +21,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 from packaging import version
 
@@ -1249,7 +1249,12 @@ class TorchAoConfig(QuantizationConfigMixin):
     ```
     """
 
-    def __init__(self, quant_type: str, modules_to_not_convert: Optional[List] = None, **kwargs):
+    def __init__(
+        self,
+        quant_type: Union[str, Dict[str, Dict[str, Any]]],
+        modules_to_not_convert: Optional[List] = None,
+        **kwargs,
+    ):
         self.quant_method = QuantizationMethod.TORCHAO
         self.quant_type = quant_type
         self.modules_to_not_convert = modules_to_not_convert
@@ -1269,23 +1274,36 @@ class TorchAoConfig(QuantizationConfigMixin):
             raise ValueError("Requires torchao 0.4.0 version and above")
 
         _STR_TO_METHOD = self._get_torchao_quant_type_to_method()
-        if self.quant_type not in _STR_TO_METHOD.keys():
-            raise ValueError(
-                f"Requested quantization type: {self.quant_type} is not supported yet, please add support in TorchAoConfig and TorchAoHfQuantizer."
-            )
 
-        method = _STR_TO_METHOD[self.quant_type]
-        sig = signature(method)
-        all_kwargs = [
-            param.name
-            for param in sig.parameters.values()
-            if param.kind in [Parameter.KEYWORD_ONLY, Parameter.POSITIONAL_OR_KEYWORD]
-        ]
-        for k in self.quant_type_kwargs:
-            if k not in all_kwargs:
+        def _check_quant_type_available(quant_type: str) -> None:
+            if quant_type not in _STR_TO_METHOD:
                 raise ValueError(
-                    f"Unexpected keyword arg: {k} for API: {method}, accepted keyword args are: {all_kwargs}"
+                    f"Requested quantization type: {quant_type} is not supported yet, please add support in TorchAoConfig and TorchAoHfQuantizer."
                 )
+
+        def _quant_type_method_kwargs(quant_type: str, kwargs: Dict[str, Any]) -> None:
+            method = _STR_TO_METHOD[quant_type]
+            sig = signature(method)
+            all_kwargs = [
+                param.name
+                for param in sig.parameters.values()
+                if param.kind in [Parameter.KEYWORD_ONLY, Parameter.POSITIONAL_OR_KEYWORD]
+            ]
+            for k in kwargs:
+                if k not in all_kwargs:
+                    raise ValueError(
+                        f"Unexpected keyword arg: {k} for API: {method}, accepted keyword args are: {all_kwargs}"
+                    )
+
+        if isinstance(self.quant_type, str):
+            _check_quant_type_available(self.quant_type)
+            _quant_type_method_kwargs(self.quant_type, self.quant_type_kwargs)
+        else:
+            for method_and_kwargs in self.quant_type.values():
+                method = method_and_kwargs["method"]
+                kwargs = method_and_kwargs.get("kwargs", {})
+                _check_quant_type_available(method)
+                _quant_type_method_kwargs(method, kwargs)
 
     def _get_torchao_quant_type_to_method(self):
         if is_torchao_available():
@@ -1307,9 +1325,44 @@ class TorchAoConfig(QuantizationConfigMixin):
                 "TorchAoConfig requires torchao to be installed, please install with `pip install torchao`"
             )
 
-    def get_apply_tensor_subclass(self):
+    def get_matching_quant_type(self, param_name: str) -> Union[Tuple[str, Dict[str, Any]], None]:
+        if isinstance(self.quant_type, str):
+            return self.quant_type, self.quant_type_kwargs
+
+        param_parts = param_name.split(".")
+        for pattern, method_and_kwargs in self.quant_type.items():
+            pattern_parts = pattern.split(".")
+
+            # If pattern is shorter than param_name and doesn't end with *, it can't match
+            if len(pattern_parts) > len(param_parts):
+                continue
+
+            matches = True
+            for pattern_part, param_part in zip(pattern_parts, param_parts):
+                # Handle wildcard
+                if pattern_part == "*":
+                    break  # Rest of the path will match
+                elif pattern_part != param_part:
+                    matches = False
+                    break
+
+            if matches:
+                method = method_and_kwargs["method"]
+                kwargs = method_and_kwargs.get("kwargs", {})
+                return method, kwargs
+
+        return None
+
+    def get_apply_tensor_subclass(self, param_name: str, module: "torch.nn.Module"):
+        quant_type, quant_type_kwargs = self.get_matching_quant_type(param_name)
         _STR_TO_METHOD = self._get_torchao_quant_type_to_method()
-        return _STR_TO_METHOD[self.quant_type](**self.quant_type_kwargs)
+        # Embedding only works with PlainAQTTensorImpl
+        if isinstance(module, torch.nn.Embedding):
+            from torchao.dtypes import PlainLayout
+
+            quant_type_kwargs["layout"] = PlainLayout()
+
+        return _STR_TO_METHOD[quant_type](**quant_type_kwargs)
 
     def __repr__(self):
         return f"{self.quant_type}({', '.join(str(k) + '=' + str(v) for k, v in self.kwargs.items())})"

@@ -112,15 +112,8 @@ class TorchAoHfQuantizer(HfQuantizer):
         return max_memory
 
     def _process_model_before_weight_loading(self, model: "PreTrainedModel", **kwargs):
-        from ..integrations import get_keys_to_not_convert
-
-        if self.quantization_config.quant_type != "int8_dynamic_activation_int4_weight":
-            self.modules_to_not_convert = get_keys_to_not_convert(model)
-
         if self.quantization_config.modules_to_not_convert is not None:
             self.modules_to_not_convert.extend(self.quantization_config.modules_to_not_convert)
-
-        return
 
     def check_quantized_param(
         self,
@@ -130,17 +123,24 @@ class TorchAoHfQuantizer(HfQuantizer):
         state_dict: Dict[str, Any],
         **kwargs,
     ) -> bool:
-        param_device = kwargs.pop("param_device", None)
         # check if the param_name is not in self.modules_to_not_convert
         if any((key + "." in param_name) or (key == param_name) for key in self.modules_to_not_convert):
             return False
-        elif param_device == "cpu" and self.offload:
+
+        param_device = kwargs.pop("param_device", None)
+        if param_device == "cpu" and self.offload:
             # We don't quantize weights that we offload
             return False
-        else:
-            # we only quantize the weight of nn.Linear
+
+        # If quant_type is a str, then only apply it to the weight of nn.Linear layers for backward compatibility
+        if isinstance(self.quantization_config.quant_type, str):
             module, tensor_name = get_module_from_name(model, param_name)
             return isinstance(module, torch.nn.Linear) and (tensor_name == "weight")
+
+        if self.quantization_config.get_matching_quant_type(param_name) is None:
+            return False
+
+        return True
 
     def create_quantized_param(
         self,
@@ -157,7 +157,11 @@ class TorchAoHfQuantizer(HfQuantizer):
         """
         module, tensor_name = get_module_from_name(model, param_name)
         module._parameters[tensor_name] = torch.nn.Parameter(param_value).to(device=target_device)
-        quantize_(module, self.quantization_config.get_apply_tensor_subclass())
+        quantize_(
+            module,
+            self.quantization_config.get_apply_tensor_subclass(param_name, module),
+            lambda module, _: isinstance(module, (torch.nn.Linear, torch.nn.Embedding)),
+        )
 
     def _process_model_after_weight_loading(self, model):
         """No process required for torchao quantized model"""
